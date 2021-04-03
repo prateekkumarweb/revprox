@@ -1,32 +1,30 @@
-use std::io::prelude::*;
-use std::net::{TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpStream};
 
-fn handle_client(mut client_stream: TcpStream) -> std::io::Result<()> {
-    let mut server_stream = TcpStream::connect("127.0.0.1:8000")?;
+async fn handle_client(mut client_stream: TcpStream) -> std::io::Result<()> {
+    let mut server_stream = TcpStream::connect("127.0.0.1:8000").await?;
 
-    let mut buf = [0; 4096];
-    let n = client_stream.read(&mut buf)?;
-    // println!("Read from client {:?}", &buf[..n]);
-    server_stream.write_all(&mut buf[..n])?;
+    let (mut client_reader, mut client_writer) = client_stream.split();
+    let (mut server_reader, mut server_writer) = server_stream.split();
 
-    while let Ok(n) = server_stream.read(&mut buf) {
-        if n != 0 {
-            // println!("Read from server {:?}", &buf[..n]);
-            client_stream.write(&mut buf[..n])?;
-        } else {
-            break;
-        }
-    }
+    let client_to_server = tokio::io::copy(&mut client_reader, &mut server_writer);
+    let server_to_client = tokio::io::copy(&mut server_reader, &mut client_writer);
+
+    let (client_to_server_result, server_to_client_result) =
+        tokio::join!(client_to_server, server_to_client);
+    client_to_server_result?;
+    server_to_client_result?;
 
     Ok(())
 }
 
-fn main() -> std::io::Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:9000")?;
-
-    for client_stream in listener.incoming() {
-        handle_client(client_stream?)?;
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    let listener = TcpListener::bind("127.0.0.1:9000").await?;
+    println!("Listening on port 9000");
+    loop {
+        println!("Waiting for client");
+        let (client_stream, addr) = listener.accept().await?;
+        println!("Accepted client {:?}", addr);
+        handle_client(client_stream).await?;
     }
-
-    Ok(())
 }
