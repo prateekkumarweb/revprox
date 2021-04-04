@@ -2,7 +2,7 @@ use hyper::{
     header,
     http::uri,
     service::{make_service_fn, service_fn},
-    Body, Client, Request, Response, Server, Uri,
+    Body, Client, Request, Response, Server, StatusCode, Uri,
 };
 use std::{collections::HashMap, convert::Infallible, net::SocketAddr, sync::Arc};
 use structopt::StructOpt;
@@ -11,7 +11,7 @@ mod opt;
 mod settings;
 
 async fn handle_client(
-    req: Request<Body>,
+    mut req: Request<Body>,
     servers_map: Arc<HashMap<String, String>>,
 ) -> Result<Response<Body>, Box<dyn std::error::Error + Send + Sync>> {
     dbg!(&req);
@@ -31,17 +31,59 @@ async fn handle_client(
         .authority(uri_parts.authority.unwrap())
         .path_and_query((req.uri().path_and_query().unwrap()).clone());
 
-    let mut new_req = Request::from(req);
+    let mut new_req_builder = Request::builder()
+        .method(req.method())
+        .uri(uri_builder.build()?)
+        .version(req.version());
 
-    *new_req.uri_mut() = uri_builder.build()?;
+    for (key, value) in req.headers() {
+        new_req_builder = new_req_builder.header(key, value);
+    }
+
+    let body = hyper::body::to_bytes(req.body_mut()).await?;
+
+    let new_req = new_req_builder.body(hyper::Body::from(body))?;
 
     dbg!(&new_req);
 
-    let resp = client.request(new_req).await?;
+    let res = client.request(new_req).await?;
 
-    dbg!(&resp);
+    dbg!(&res);
 
-    Ok(resp)
+    Ok(if res.status() == StatusCode::SWITCHING_PROTOCOLS {
+        handle_ws(req, res).await?
+    } else {
+        res
+    })
+}
+
+async fn handle_ws(
+    mut req: Request<Body>,
+    mut res: Response<Body>,
+) -> Result<Response<Body>, Box<dyn std::error::Error + Send + Sync>> {
+    match hyper::upgrade::on(&mut res).await {
+        Ok(upgraded_server) => {
+            tokio::task::spawn(async move {
+                match hyper::upgrade::on(&mut req).await {
+                    Ok(upgraded_client) => {
+                        let (mut server_reader, mut server_writer) =
+                            tokio::io::split(upgraded_server);
+                        let (mut client_reader, mut client_writer) =
+                            tokio::io::split(upgraded_client);
+                        let server_to_client =
+                            tokio::io::copy(&mut server_reader, &mut client_writer);
+                        let client_to_server =
+                            tokio::io::copy(&mut client_reader, &mut server_writer);
+                        tokio::try_join!(server_to_client, client_to_server).unwrap();
+                    }
+                    Err(e) => eprintln!("upgrade error: {}", e),
+                };
+            });
+        }
+        Err(e) => eprintln!("upgrade error: {}", e),
+    }
+
+    Ok(res)
 }
 
 #[tokio::main]
