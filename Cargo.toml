@@ -1,11 +1,14 @@
 [package]
 name = "revprox"
 version = "0.1.0"
-authors = ["Prateek Kumar <prateek@prateekkumar.in>"]
+authors = [ "Prateek Kumar <prateek@prateekkumar.in>" ]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-hyper = { version = "0.14", features = ["full"] }
-tokio = { version = "1.4", features = ["full"] }
+config = "0.11"
+hyper = { version = "0.14", features = [ "full" ] }
+serde = { version = "1.0", features = [ "derive" ] }
+structopt = "0.3"
+tokio = { version = "1.4", features = [ "full" ] }
