@@ -1,30 +1,40 @@
-use tokio::net::{TcpListener, TcpStream};
+use std::{convert::Infallible, net::SocketAddr};
 
-async fn handle_client(mut client_stream: TcpStream) -> std::io::Result<()> {
-    let mut server_stream = TcpStream::connect("127.0.0.1:8000").await?;
+use hyper::{
+    header,
+    service::{make_service_fn, service_fn},
+    Body, Client, Request, Response, Server,
+};
 
-    let (mut client_reader, mut client_writer) = client_stream.split();
-    let (mut server_reader, mut server_writer) = server_stream.split();
-
-    let client_to_server = tokio::io::copy(&mut client_reader, &mut server_writer);
-    let server_to_client = tokio::io::copy(&mut server_reader, &mut client_writer);
-
-    let (client_to_server_result, server_to_client_result) =
-        tokio::join!(client_to_server, server_to_client);
-    client_to_server_result?;
-    server_to_client_result?;
-
-    Ok(())
+async fn handle_client(
+    req: Request<Body>,
+) -> Result<Response<Body>, Box<dyn std::error::Error + Send + Sync>> {
+    let client = Client::new();
+    println!("Host: {:?}", req.headers().get(header::HOST));
+    let host = req.headers().get(header::HOST);
+    let uri = match host {
+        Some(host) => match host.to_str() {
+            Ok("a.localhost:9000") => "http://127.0.0.1:8000/".parse()?,
+            Ok("b.localhost:9000") => "http://127.0.0.1:8001/".parse()?,
+            _ => "http://127.0.0.1:8000/".parse()?,
+        },
+        None => "http://127.0.0.1:8000/".parse()?,
+    };
+    let mut new_req = Request::from(req);
+    *new_req.uri_mut() = uri;
+    let resp = client.request(new_req).await?;
+    Ok(resp)
 }
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
-    let listener = TcpListener::bind("127.0.0.1:9000").await?;
+async fn main() {
+    let addr = SocketAddr::from(([127, 0, 0, 1], 9000));
+    let make_svc =
+        make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle_client)) });
+    let server = Server::bind(&addr).serve(make_svc);
+
     println!("Listening on port 9000");
-    loop {
-        println!("Waiting for client");
-        let (client_stream, addr) = listener.accept().await?;
-        println!("Accepted client {:?}", addr);
-        handle_client(client_stream).await?;
+    if let Err(e) = server.await {
+        eprintln!("Server error: {}", e);
     }
 }
