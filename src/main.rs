@@ -59,10 +59,10 @@ async fn main() {
         }
     });
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 9000));
+    let addr = SocketAddr::from(([127, 0, 0, 1], opt.port));
     let server = Server::bind(&addr).serve(make_svc);
 
-    println!("Listening on port 9000");
+    println!("Listening on port {}", opt.port);
 
     if let Err(e) = server.await {
         eprintln!("Server error: {}", e);
