@@ -523,6 +523,7 @@ version = "0.1.0"
 dependencies = [
  "config",
  "hyper",
+ "lazy_static",
  "serde 1.0.125",
  "structopt",
  "tokio",

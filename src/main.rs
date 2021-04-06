@@ -1,14 +1,28 @@
 use hyper::{
-    header,
+    header::{self, HeaderValue},
     http::uri,
     service::{make_service_fn, service_fn},
     Body, Client, Request, Response, Server, StatusCode, Uri,
 };
+use lazy_static::lazy_static;
 use std::{collections::HashMap, convert::Infallible, net::SocketAddr, sync::Arc};
 use structopt::StructOpt;
 
 mod opt;
 mod settings;
+
+lazy_static! {
+    static ref CONNECTION_HEADERS: Vec<&'static str> = vec![
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade"
+    ];
+}
 
 async fn handle_client(
     mut req: Request<Body>,
@@ -31,6 +45,9 @@ async fn handle_client(
         .authority(uri_parts.authority.unwrap())
         .path_and_query((req.uri().path_and_query().unwrap()).clone());
 
+    let is_upgrade_websocket_request =
+        req.headers().get(header::UPGRADE) == Some(&HeaderValue::from_bytes(b"websocket").unwrap());
+
     let mut new_req_builder = Request::builder()
         .method(req.method())
         .uri(uri_builder.build()?)
@@ -40,8 +57,30 @@ async fn handle_client(
         new_req_builder = new_req_builder.header(key, value);
     }
 
-    let body = hyper::body::to_bytes(req.body_mut()).await?;
+    // Strip hop by hop headers
+    if let Some(connection_headers) = req.headers().get(header::CONNECTION) {
+        let connection_headers = connection_headers
+            .to_str()
+            .unwrap()
+            .split(",")
+            .map(|v| v.trim())
+            .collect::<Vec<_>>();
 
+        for header in connection_headers {
+            new_req_builder.headers_mut().unwrap().remove(header);
+        }
+    }
+    for header in CONNECTION_HEADERS.iter() {
+        new_req_builder.headers_mut().unwrap().remove(*header);
+    }
+
+    if is_upgrade_websocket_request {
+        new_req_builder = new_req_builder
+            .header(header::CONNECTION, "Upgrade")
+            .header(header::UPGRADE, "websocket");
+    }
+
+    let body = hyper::body::to_bytes(req.body_mut()).await?;
     let new_req = new_req_builder.body(hyper::Body::from(body))?;
 
     dbg!(&new_req);
