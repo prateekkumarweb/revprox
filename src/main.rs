@@ -1,35 +1,24 @@
-use futures_util::stream::Stream;
+use anyhow::Context;
 use handler::Handler;
 use hyper::{
+    server::conn::AddrIncoming,
     service::{make_service_fn, service_fn},
     Server,
 };
-use std::{
-    convert::Infallible,
-    fs::File,
-    io::BufReader,
-    net::SocketAddr,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
+use std::{fs::File, io::BufReader, net::SocketAddr, sync::Arc};
 use structopt::StructOpt;
-use tokio::net::{TcpListener, TcpStream};
-use tokio_rustls::{
-    rustls::{
-        internal::pemfile::{certs, pkcs8_private_keys},
-        NoClientAuth, ServerConfig,
-    },
-    server::TlsStream,
-    TlsAcceptor,
+use tokio_rustls::rustls::{
+    internal::pemfile::{certs, pkcs8_private_keys},
+    NoClientAuth, ServerConfig,
 };
 
 mod handler;
 mod opt;
 mod settings;
+mod tls;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     let opt = opt::Opt::from_args();
     let settings = settings::Settings::from_config_file(opt.config);
     let handler = Handler::new(settings.servers());
@@ -41,54 +30,31 @@ async fn main() {
 
     let mut server_config = ServerConfig::new(NoClientAuth::new());
     server_config.set_single_cert(cert, keys.remove(0)).unwrap();
-    let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
 
     let addr = SocketAddr::from(([127, 0, 0, 1], opt.port));
-    let tcp = TcpListener::bind(&addr).await.unwrap();
 
-    let incoming_tls_stream = async_stream::stream! {
-        loop {
-            let (socket, _) = tcp.accept().await.unwrap();
-            let stream = tls_acceptor.accept(socket);
-            yield stream.await;
-        }
-    };
+    let mut incoming = AddrIncoming::bind(&addr)?;
+    incoming.set_nodelay(true);
 
-    let make_service = make_service_fn(|conn: &TlsStream<TcpStream>| {
+    let make_service = make_service_fn(|conn: &tls::TlsStream| {
         let handler = handler.clone();
-        let addr = conn.get_ref().0.peer_addr().unwrap();
+        let addr = conn.remote_addr();
         async move {
-            Ok::<_, Infallible>(service_fn(move |req| {
-                let handler = handler.clone();
-                handler.handle_client(addr, req)
+            Ok::<_, anyhow::Error>(service_fn(move |req| {
+                let handle_future = handler.clone().handle_client(addr, req);
+                async { handle_future.await.context("Failed to handle client") }
             }))
         }
     });
 
-    let server = Server::builder(HyperAcceptor {
-        acceptor: Box::pin(incoming_tls_stream),
-    })
-    .serve(make_service);
+    let server =
+        Server::builder(tls::TlsAcceptor::new(server_config, incoming)).serve(make_service);
 
     println!("Listening on port {}", opt.port);
 
     if let Err(e) = server.await {
         eprintln!("Server error: {}", e);
     }
-}
 
-struct HyperAcceptor<'a> {
-    acceptor: Pin<Box<dyn Stream<Item = Result<TlsStream<TcpStream>, std::io::Error>> + 'a>>,
-}
-
-impl hyper::server::accept::Accept for HyperAcceptor<'_> {
-    type Conn = TlsStream<TcpStream>;
-    type Error = std::io::Error;
-
-    fn poll_accept(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context,
-    ) -> Poll<Option<Result<Self::Conn, Self::Error>>> {
-        Pin::new(&mut self.acceptor).poll_next(cx)
-    }
+    Ok(())
 }

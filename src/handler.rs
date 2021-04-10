@@ -19,7 +19,7 @@ impl Handler {
         self: Arc<Self>,
         addr: SocketAddr,
         mut req: Request<Body>,
-    ) -> Result<Response<Body>, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> anyhow::Result<Response<Body>> {
         dbg!(&req);
 
         let client = Client::new();
@@ -81,7 +81,7 @@ impl Handler {
 async fn handle_upgrade(
     mut req: Request<Body>,
     mut res: Response<Body>,
-) -> Result<Response<Body>, Box<dyn std::error::Error + Send + Sync>> {
+) -> anyhow::Result<Response<Body>> {
     match hyper::upgrade::on(&mut res).await {
         Ok(upgraded_server) => {
             tokio::task::spawn(async move {
