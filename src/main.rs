@@ -24,7 +24,7 @@ mod tls;
 async fn main() -> anyhow::Result<()> {
     let opt = opt::Opt::from_args();
     let settings = settings::Settings::from_config_file(opt.config);
-    let handler = Handler::new(settings.servers());
+    let handler = Handler::new(settings.servers(), opt.tls);
     let handler = Arc::new(handler);
 
     let cert = certs(&mut BufReader::new(File::open("./cert.pem").unwrap())).unwrap();

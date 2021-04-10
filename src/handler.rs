@@ -8,11 +8,12 @@ use std::{collections::HashMap, convert::TryInto, net::SocketAddr, sync::Arc};
 
 pub struct Handler {
     servers_map: HashMap<String, String>,
+    tls: bool,
 }
 
 impl Handler {
-    pub fn new(servers_map: HashMap<String, String>) -> Self {
-        Self { servers_map }
+    pub fn new(servers_map: HashMap<String, String>, tls: bool) -> Self {
+        Self { servers_map, tls }
     }
 
     pub async fn handle_client(
@@ -57,7 +58,7 @@ impl Handler {
             new_headers_mut.insert(header::UPGRADE, upgrade.try_into().unwrap());
         }
 
-        insert_forwarded_headers(new_headers_mut, addr);
+        insert_forwarded_headers(new_headers_mut, addr, self.tls);
 
         // TODO: This creates a copy of req body in memory. any way to avoid it?
         let body = hyper::body::to_bytes(req.body_mut()).await?;
@@ -153,7 +154,7 @@ fn strip_connection_and_hop_headers(headers_mut: &mut HeaderMap<HeaderValue>) {
     }
 }
 
-fn insert_forwarded_headers(headers_mut: &mut HeaderMap<HeaderValue>, addr: SocketAddr) {
+fn insert_forwarded_headers(headers_mut: &mut HeaderMap<HeaderValue>, addr: SocketAddr, tls: bool) {
     const X_FORWARDED_FOR: &'static str = "X-Forwarded-For";
     const X_FORWARDED_PROTO: &'static str = "X-Forwarded-Proto";
 
@@ -173,7 +174,9 @@ fn insert_forwarded_headers(headers_mut: &mut HeaderMap<HeaderValue>, addr: Sock
     }
 
     if !headers_mut.contains_key(X_FORWARDED_PROTO) {
-        // TODO: How to find the protocol used by client?
-        headers_mut.insert(X_FORWARDED_PROTO, HeaderValue::from_static("https"));
+        headers_mut.insert(
+            X_FORWARDED_PROTO,
+            HeaderValue::from_static(if tls { "https" } else { "http" }),
+        );
     }
 }
