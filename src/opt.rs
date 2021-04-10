@@ -10,4 +10,8 @@ pub struct Opt {
     /// Port to run on
     #[structopt(short, long, default_value = "9000")]
     pub port: u16,
+
+    /// Use tls
+    #[structopt(long)]
+    pub tls: bool,
 }

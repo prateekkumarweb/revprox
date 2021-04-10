@@ -1,7 +1,10 @@
+#[macro_use]
+mod macros;
+
 use anyhow::Context;
 use handler::Handler;
 use hyper::{
-    server::conn::AddrIncoming,
+    server::conn::{AddrIncoming, AddrStream},
     service::{make_service_fn, service_fn},
     Server,
 };
@@ -36,25 +39,13 @@ async fn main() -> anyhow::Result<()> {
     let mut incoming = AddrIncoming::bind(&addr)?;
     incoming.set_nodelay(true);
 
-    let make_service = make_service_fn(|conn: &tls::TlsStream| {
-        let handler = handler.clone();
-        let addr = conn.remote_addr();
-        async move {
-            Ok::<_, anyhow::Error>(service_fn(move |req| {
-                let handle_future = handler.clone().handle_client(addr, req);
-                async { handle_future.await.context("Failed to handle client") }
-            }))
-        }
-    });
-
-    let server =
-        Server::builder(tls::TlsAcceptor::new(server_config, incoming)).serve(make_service);
-
-    println!("Listening on port {}", opt.port);
-
-    if let Err(e) = server.await {
-        eprintln!("Server error: {}", e);
-    }
+    if opt.tls {
+        println!("Starting https server on port {}", opt.port);
+        create_server!(tls: handler, incoming, server_config);
+    } else {
+        println!("Starting http server on port {}", opt.port);
+        create_server!(handler, incoming);
+    };
 
     Ok(())
 }
