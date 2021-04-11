@@ -1,4 +1,4 @@
-// Adopted from https://github.com/seanmonstar/warp/blob/ffefea08050ffe8022d3391f4bd5e5ab4e95d7c9/src/tls.rs
+// Adapted from https://github.com/seanmonstar/warp/blob/ffefea08050ffe8022d3391f4bd5e5ab4e95d7c9/src/tls.rs
 // LICENSE: MIT
 // Copyright (c) 2018-2020 Sean McArthur
 

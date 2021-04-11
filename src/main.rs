@@ -14,6 +14,7 @@ use tokio_rustls::rustls::{
     internal::pemfile::{certs, pkcs8_private_keys},
     NoClientAuth, ServerConfig,
 };
+use tracing::info;
 
 mod handler;
 mod opt;
@@ -22,6 +23,8 @@ mod tls;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
+
     let opt = opt::Opt::from_args();
     let settings = settings::Settings::from_config_file(opt.config);
     let handler = Handler::new(settings.servers(), opt.tls);
@@ -40,10 +43,10 @@ async fn main() -> anyhow::Result<()> {
     incoming.set_nodelay(true);
 
     if opt.tls {
-        println!("Starting https server on port {}", opt.port);
+        info!("Starting https server on port {}", opt.port);
         create_server!(tls: handler, incoming, server_config);
     } else {
-        println!("Starting http server on port {}", opt.port);
+        info!("Starting http server on port {}", opt.port);
         create_server!(handler, incoming);
     };
 

@@ -29,7 +29,7 @@ macro_rules! create_service {
 macro_rules! server_await {
     ($server:expr) => {
         if let Err(e) = $server.await {
-            eprintln!("Server error: {}", e);
+            tracing::error!("Server error: {}", e);
         }
     };
 }

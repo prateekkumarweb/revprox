@@ -5,6 +5,7 @@ use hyper::{
 };
 use lazy_static::lazy_static;
 use std::{collections::HashMap, convert::TryInto, net::SocketAddr, sync::Arc};
+use tracing::{error, info};
 
 pub struct Handler {
     servers_map: HashMap<String, String>,
@@ -21,7 +22,7 @@ impl Handler {
         addr: SocketAddr,
         mut req: Request<Body>,
     ) -> anyhow::Result<Response<Body>> {
-        dbg!(&req);
+        info!("{:?}", &req);
 
         let client = Client::new();
         let host = req.headers().get(header::HOST);
@@ -64,11 +65,11 @@ impl Handler {
         let body = hyper::body::to_bytes(req.body_mut()).await?;
         let new_req = new_req_builder.body(hyper::Body::from(body))?;
 
-        dbg!(&new_req);
+        info!("{:?}", &new_req);
 
         let mut res = client.request(new_req).await?;
 
-        dbg!(&res);
+        info!("{:?}", &res);
 
         Ok(if res.status() == StatusCode::SWITCHING_PROTOCOLS {
             handle_upgrade(req, res).await?
@@ -98,11 +99,11 @@ async fn handle_upgrade(
                             tokio::io::copy(&mut client_reader, &mut server_writer);
                         tokio::try_join!(server_to_client, client_to_server).unwrap();
                     }
-                    Err(e) => eprintln!("upgrade error: {}", e),
+                    Err(e) => error!("upgrade error: {}", e),
                 };
             });
         }
-        Err(e) => eprintln!("upgrade error: {}", e),
+        Err(e) => error!("upgrade error: {}", e),
     }
 
     Ok(res)
