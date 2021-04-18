@@ -44,9 +44,9 @@ impl Tunnel {
                     tokio::spawn(async {
                         crate::utils::copy_duplex(channel, client_socket)
                             .await
-                            .unwrap()
+                            .unwrap();
+                        info!("Closed connection");
                     });
-                    info!("Closed connection");
                 }
                 Err(err) => {
                     error!("accept failed, error: {:?}", err);
