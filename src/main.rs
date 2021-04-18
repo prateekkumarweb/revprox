@@ -20,6 +20,8 @@ mod handler;
 mod opt;
 mod settings;
 mod tls;
+mod tssh;
+mod tunnel;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -30,22 +32,23 @@ async fn main() -> anyhow::Result<()> {
     let handler = Handler::new(settings.servers(), opt.tls);
     let handler = Arc::new(handler);
 
-    let cert = certs(&mut BufReader::new(File::open("./cert.pem").unwrap())).unwrap();
-    let mut keys =
-        pkcs8_private_keys(&mut BufReader::new(File::open("./key.pem").unwrap())).unwrap();
-
-    let mut server_config = ServerConfig::new(NoClientAuth::new());
-    server_config.set_single_cert(cert, keys.remove(0)).unwrap();
-
     let addr = SocketAddr::from(([127, 0, 0, 1], opt.port));
 
     let mut incoming = AddrIncoming::bind(&addr)?;
     incoming.set_nodelay(true);
 
     if opt.tls {
+        let cert = certs(&mut BufReader::new(File::open("./cert.pem").unwrap())).unwrap();
+        let mut keys =
+            pkcs8_private_keys(&mut BufReader::new(File::open("./key.pem").unwrap())).unwrap();
+
+        let mut server_config = ServerConfig::new(NoClientAuth::new());
+        server_config.set_single_cert(cert, keys.remove(0)).unwrap();
+
         info!("Starting https server on port {}", opt.port);
         create_server!(tls: handler, incoming, server_config);
     } else {
+        tssh::main().await?;
         info!("Starting http server on port {}", opt.port);
         create_server!(handler, incoming);
     };
