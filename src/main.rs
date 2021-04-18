@@ -16,11 +16,11 @@ use tokio_rustls::rustls::{
 };
 use tracing::info;
 
+mod async_ssh;
 mod handler;
 mod opt;
 mod settings;
 mod tls;
-mod tssh;
 mod tunnel;
 
 #[tokio::main]
@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
         info!("Starting https server on port {}", opt.port);
         create_server!(tls: handler, incoming, server_config);
     } else {
-        tssh::main().await?;
+        async_ssh::main().await?;
         info!("Starting http server on port {}", opt.port);
         create_server!(handler, incoming);
     };
