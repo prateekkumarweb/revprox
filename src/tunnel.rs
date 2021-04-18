@@ -1,4 +1,4 @@
-use crate::async_ssh::AsyncSession;
+use crate::async_ssh::{AsyncSession, HandshakenAsyncSession};
 use std::net::TcpStream;
 use tokio::io;
 use tracing::{error, info};
@@ -6,14 +6,13 @@ use tracing::{error, info};
 pub struct Tunnel {
     client_port: u16,
     server_port: u16,
-    session: AsyncSession,
+    session: HandshakenAsyncSession,
 }
 
 impl Tunnel {
     pub async fn new(ssh_server: &str, client_port: u16, server_port: u16) -> io::Result<Self> {
         let tcp = TcpStream::connect(ssh_server)?;
-        let mut session = AsyncSession::new(tcp)?;
-        session.handshake().await?;
+        let session = AsyncSession::new(tcp)?.handshake().await?;
 
         session.userauth_pubkey_file().await?;
 
@@ -42,7 +41,11 @@ impl Tunnel {
                     let client_socket =
                         tokio::net::TcpStream::connect(&format!("127.0.0.1:{}", self.client_port))
                             .await?;
-                    crate::utils::copy_duplex(channel, client_socket).await?;
+                    tokio::spawn(async {
+                        crate::utils::copy_duplex(channel, client_socket)
+                            .await
+                            .unwrap()
+                    });
                     info!("Closed connection");
                 }
                 Err(err) => {

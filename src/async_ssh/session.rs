@@ -1,11 +1,15 @@
 use ssh2::Session;
-use std::{net::TcpStream, path::Path};
+use std::{net::TcpStream, path::Path, sync::Arc};
 use tokio::io::{self, unix::AsyncFd};
 
 use super::listener::AsyncListener;
 
 pub struct AsyncSession {
     inner: AsyncFd<Session>,
+}
+
+pub struct HandshakenAsyncSession {
+    inner: Arc<AsyncFd<Session>>,
 }
 
 impl AsyncSession {
@@ -23,8 +27,33 @@ impl AsyncSession {
         })
     }
 
-    pub async fn handshake(&mut self) -> io::Result<()> {
-        try_write_mut(&mut self.inner, |session| session.handshake()).await
+    pub async fn handshake(mut self) -> io::Result<HandshakenAsyncSession> {
+        loop {
+            let mut guard = self.inner.writable_mut().await?;
+            match guard.try_io(|inner| inner.get_mut().handshake().map_err(Into::into)) {
+                Ok(result) => {
+                    return result.map(|_| HandshakenAsyncSession {
+                        inner: Arc::new(self.inner),
+                    })
+                }
+                Err(_would_block) => continue,
+            }
+        }
+    }
+}
+
+impl HandshakenAsyncSession {
+    pub async fn channel_forward_listen(
+        &self,
+        remote_port: u16,
+        host: Option<&str>,
+        queue_maxsize: Option<u32>,
+    ) -> io::Result<(AsyncListener, u16)> {
+        let (listener, port) = try_write(&self.inner, |session| {
+            session.channel_forward_listen(remote_port, host, queue_maxsize)
+        })
+        .await?;
+        Ok((AsyncListener::new(listener, self.inner.clone()), port))
     }
 
     pub async fn userauth_pubkey_file(&self) -> io::Result<()> {
@@ -42,19 +71,6 @@ impl AsyncSession {
     pub fn authenticated(&self) -> bool {
         self.inner.get_ref().authenticated()
     }
-
-    pub async fn channel_forward_listen(
-        &self,
-        remote_port: u16,
-        host: Option<&str>,
-        queue_maxsize: Option<u32>,
-    ) -> io::Result<(AsyncListener<'_>, u16)> {
-        let (listener, port) = try_write(&self.inner, |session| {
-            session.channel_forward_listen(remote_port, host, queue_maxsize)
-        })
-        .await?;
-        Ok((AsyncListener::new(listener, &self.inner), port))
-    }
 }
 
 async fn try_write<R>(
@@ -64,19 +80,6 @@ async fn try_write<R>(
     loop {
         let mut guard = session.writable().await?;
         match guard.try_io(|inner| cb(inner.get_ref()).map_err(Into::into)) {
-            Ok(result) => return result,
-            Err(_would_block) => continue,
-        }
-    }
-}
-
-async fn try_write_mut<R>(
-    session: &mut AsyncFd<Session>,
-    cb: impl Fn(&mut Session) -> Result<R, ssh2::Error>,
-) -> io::Result<R> {
-    loop {
-        let mut guard = session.writable_mut().await?;
-        match guard.try_io(|inner| cb(inner.get_mut()).map_err(Into::into)) {
             Ok(result) => return result,
             Err(_would_block) => continue,
         }

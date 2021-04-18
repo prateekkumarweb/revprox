@@ -1,5 +1,5 @@
 pub use listener::AsyncListener;
-pub use session::AsyncSession;
+pub use session::{AsyncSession, HandshakenAsyncSession};
 use std::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tracing::{error, info};
@@ -10,8 +10,7 @@ mod session;
 
 pub async fn main() -> anyhow::Result<()> {
     let tcp = TcpStream::connect("10.108.79.149:22")?;
-    let mut sess = AsyncSession::new(tcp)?;
-    sess.handshake().await?;
+    let sess = AsyncSession::new(tcp)?.handshake().await?;
 
     sess.userauth_pubkey_file().await?;
 
