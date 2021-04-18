@@ -1,11 +1,11 @@
-use futures::{ready, AsyncRead, AsyncWrite};
+use futures::ready;
 use ssh2::{Channel, Session, Stream};
 use std::{
     io::{Read, Write},
     pin::Pin,
-    task::Poll,
+    task::{Context, Poll},
 };
-use tokio::io::{self, unix::AsyncFd};
+use tokio::io::{self, unix::AsyncFd, AsyncRead, AsyncWrite, ReadBuf};
 
 pub struct AsyncChannel<'a> {
     inner: Channel,
@@ -27,10 +27,10 @@ impl<'a> AsyncChannel<'a> {
 
 impl AsyncRead for AsyncChannel<'_> {
     fn poll_read(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut [u8],
-    ) -> std::task::Poll<io::Result<usize>> {
+        self: Pin<&mut Self>,
+        cx: &mut Context,
+        buf: &mut ReadBuf,
+    ) -> Poll<io::Result<()>> {
         std::pin::Pin::new(&mut self.stream(0)).poll_read(cx, buf)
     }
 }
@@ -48,10 +48,10 @@ impl AsyncWrite for AsyncChannel<'_> {
         Pin::new(&mut self.stream(0)).poll_flush(cx)
     }
 
-    fn poll_close(
+    fn poll_shutdown(
         mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> Poll<io::Result<()>> {
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), io::Error>> {
         loop {
             let mut guard = ready!(self.session.poll_write_ready(cx))?;
             match guard.try_io(|_| self.inner.close().map_err(Into::into)) {
@@ -79,13 +79,14 @@ impl<'a> AsyncStream<'a> {
 impl AsyncRead for AsyncStream<'_> {
     fn poll_read(
         mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
+        cx: &mut Context,
+        buf: &mut ReadBuf,
+    ) -> Poll<io::Result<()>> {
         loop {
             let mut guard = ready!(self.session.poll_read_ready(cx))?;
-            match guard.try_io(|_| self.inner.read(buf).map_err(Into::into)) {
-                Ok(result) => return Poll::Ready(result),
+            let unfilled: &mut [u8] = buf.initialize_unfilled();
+            match guard.try_io(|_| self.inner.read(unfilled).map_err(Into::into)) {
+                Ok(result) => return Poll::Ready(result.map(|n| buf.advance(n))),
                 Err(_would_block) => continue,
             }
         }
@@ -120,7 +121,7 @@ impl AsyncWrite for AsyncStream<'_> {
         }
     }
 
-    fn poll_close(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<io::Result<()>> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         self.poll_flush(cx)
     }
 }
